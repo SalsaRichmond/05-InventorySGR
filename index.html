@@ -1121,6 +1121,30 @@
       color: #0284c7;
       border-color: rgba(2, 132, 199, 0.25);
     }
+
+    .meta-badge.badge-assigned {
+      color: #60a5fa;
+      border-color: rgba(96, 165, 250, 0.35);
+      background-color: rgba(96, 165, 250, 0.08);
+      font-weight: 600;
+    }
+    [data-theme="light"] .meta-badge.badge-assigned {
+      color: #1d4ed8;
+      border-color: rgba(29, 78, 216, 0.35);
+      background-color: rgba(29, 78, 216, 0.06);
+    }
+
+    .meta-badge.badge-available {
+      color: #34d399;
+      border-color: rgba(52, 211, 153, 0.35);
+      background-color: rgba(52, 211, 153, 0.08);
+      font-weight: 600;
+    }
+    [data-theme="light"] .meta-badge.badge-available {
+      color: #047857;
+      border-color: rgba(4, 120, 87, 0.35);
+      background-color: rgba(4, 120, 87, 0.06);
+    }
     
     /* Hide top overlay badges in list view to avoid redundancy */
     .item-grid.layout-list .item-image-box .id-tag,
@@ -2527,8 +2551,10 @@
         errorImageLoad: "Error loading image",
         errorDescRequired: "Item description is required.",
         assignToLabel: "ASSIGN TO",
+        assignedToLabel: "ASSIGNED TO",
         assignToPerformer: "Assign to Performer:",
-        assignedToLabel: "Assigned to:",
+        statusAvailable: "Available",
+        statusAssigned: "Assigned",
         unassignedOption: "🔓 Unassigned / Available",
         batchAssignBtn: "Batch Assign",
         batchAssignBarTitle: "Batch Assignment",
@@ -2657,8 +2683,10 @@
         errorImageLoad: "Error al cargar la imagen",
         errorDescRequired: "La descripción del artículo es obligatoria.",
         assignToLabel: "ASIGNAR A",
+        assignedToLabel: "ASIGNADO A",
         assignToPerformer: "Asignar a Bailarín:",
-        assignedToLabel: "Asignado a:",
+        statusAvailable: "Disponible",
+        statusAssigned: "Asignado",
         unassignedOption: "🔓 No Asignado / Disponible",
         batchAssignBtn: "Asignar en Lote",
         batchAssignBarTitle: "Asignación en Lote",
@@ -3022,6 +3050,7 @@
                   ],
                   performersList: [
                     { email: payload.email, name: name },
+                    { email: "ednatradicion@gmail.com", name: "Edna Tradición" },
                     { email: "demo@gmail.com", name: "Demo Performer" },
                     { email: "rodriguez2113@gmail.com", name: "Director" }
                   ],
@@ -4821,9 +4850,8 @@
           `;
         }
 
-        const assignedEmail = (item.assigned || '').trim().toLowerCase();
-        const isAssigned = assignedEmail && assignedEmail.indexOf('@') !== -1;
-        const assignedName = isAssigned ? getPerformerDisplayName(assignedEmail) : (dict.switcherUnassigned ? dict.switcherUnassigned.replace(/^[^\w\s]+/, '').trim() : 'Unassigned');
+        const isAssigned = isItemAssigned(item.assigned);
+        const assignedName = isAssigned ? getPerformerDisplayName(item.assigned) : (dict.switcherUnassigned ? dict.switcherUnassigned.replace(/^[^\w\s]+/, '').trim() : 'Unassigned');
 
         card.innerHTML = `
           ${state.batchMode ? `
@@ -4847,14 +4875,19 @@
                 <span class="meta-badge">ID: ${item.id || 'N/A'}</span>
                 <span class="meta-badge badge-gold">${dict.costLabel} ${formattedCost}</span>
                 <span class="meta-badge badge-type">${dict.typeLabel} ${item.type || 'General'}</span>
+                ${state.isAdmin ? (
+                  isAssigned ? 
+                    `<span class="meta-badge badge-assigned">👤 ${dict.assignedToLabel || 'ASSIGNED TO'}: ${assignedName}</span>` :
+                    `<span class="meta-badge badge-available">🔓 ${dict.statusAvailable || 'Available'}</span>`
+                ) : ''}
               </div>
               ${state.isAdmin ? `
                 <div class="assigned-inline-row">
-                  <label class="status-label" style="display: flex; align-items: center; gap: 4px; color: var(--accent-gold); font-size: 0.78rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; margin: 0; white-space: nowrap;">
-                    <span>${dict.assignToLabel || 'ASSIGN TO'}</span>
+                  <label class="status-label" style="display: flex; align-items: center; gap: 4px; color: ${isAssigned ? 'var(--info-blue)' : 'var(--accent-gold)'}; font-size: 0.78rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; margin: 0; white-space: nowrap;">
+                    <span>${isAssigned ? (dict.assignedToLabel || 'ASSIGNED TO') : (dict.assignToLabel || 'ASSIGN TO')}</span>
                   </label>
-                  <div class="status-select-wrapper" style="width: auto; flex: 0 1 240px; min-width: 170px; max-width: 280px;">
-                    <select class="status-select ${isAssigned ? 'val-assigned' : 'val-unset'}" id="assigned-select-${item.rowIndex}" onchange="saveItemAssignment(${item.rowIndex}, '${item.id}')" style="border-color: rgba(245, 197, 66, 0.4); padding: 0.35rem 2rem 0.35rem 0.65rem; font-size: 0.82rem; height: 34px;">
+                  <div class="status-select-wrapper" style="width: auto; flex: 0 1 260px; min-width: 170px; max-width: 320px;">
+                    <select class="status-select ${isAssigned ? 'val-assigned' : 'val-unset'}" id="assigned-select-${item.rowIndex}" onchange="saveItemAssignment(${item.rowIndex}, '${item.id}')" style="border-color: ${isAssigned ? 'rgba(59, 130, 246, 0.45)' : 'rgba(245, 197, 66, 0.4)'}; padding: 0.35rem 2rem 0.35rem 0.65rem; font-size: 0.82rem; height: 34px;">
                       ${getPerformerOptionsHtml(item.assigned)}
                     </select>
                   </div>
@@ -4930,12 +4963,27 @@
       setTimeout(() => { elements.lightboxImg.src = ""; }, 250);
     }
 
+    function isItemAssigned(assigned) {
+      if (!assigned) return false;
+      const clean = assigned.toString().trim().toLowerCase();
+      if (!clean || clean === 'available' || clean === 'unassigned' || clean === 'none' || clean === '-' || clean === 'disponible' || clean === 'no asignado') {
+        return false;
+      }
+      return true;
+    }
+
     function getPerformerDisplayName(email) {
-      if (!email || email.indexOf('@') === -1) return '';
-      const clean = email.trim().toLowerCase();
+      if (!email) return '';
+      const clean = email.toString().trim().toLowerCase();
+      if (!isItemAssigned(clean)) return '';
       const found = (state.performers || []).find(p => p.email && p.email.trim().toLowerCase() === clean);
       if (found && found.name) return found.name;
-      return formatEmailToName(clean);
+      const foundByName = (state.performers || []).find(p => p.name && p.name.trim().toLowerCase() === clean);
+      if (foundByName && foundByName.name) return foundByName.name;
+      if (clean.indexOf('@') !== -1) {
+        return formatEmailToName(clean);
+      }
+      return email.toString().trim();
     }
 
     function formatEmailToName(email) {
@@ -4946,25 +4994,39 @@
 
     function getPerformerOptionsHtml(selectedEmail) {
       const dict = i18n[state.language || 'en'];
-      const cleanSelected = (selectedEmail || '').trim().toLowerCase();
-      let html = `<option value="" ${!cleanSelected ? 'selected' : ''}>${dict.unassignedOption || '— (Unassigned / Available) —'}</option>`;
+      const raw = (selectedEmail || '').toString().trim();
+      const cleanSelected = raw.toLowerCase();
+      const isAssigned = isItemAssigned(cleanSelected);
+
+      let html = `<option value="" ${!isAssigned ? 'selected' : ''}>${dict.unassignedOption || '🔓 Unassigned / Available'}</option>`;
       
       const sortedPerformers = [...(state.performers || [])];
       sortedPerformers.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
       
+      let matchFound = false;
+
       sortedPerformers.forEach(perf => {
         if (perf && perf.email) {
           const email = perf.email.trim().toLowerCase();
-          const isSelected = email === cleanSelected;
+          const isSelected = isAssigned && (email === cleanSelected || (perf.name && perf.name.trim().toLowerCase() === cleanSelected));
+          if (isSelected) matchFound = true;
           const isExcluded = !!perf.excluded;
           // If performer is excluded, only include them in dropdown if they are ALREADY assigned to this item
           if (isExcluded && !isSelected) return;
 
           const name = perf.name || formatEmailToName(email);
           const excludedTag = isExcluded ? (state.language === 'es' ? ' [Excluido]' : ' [Excluded]') : '';
-          html += `<option value="${email}" ${isSelected ? 'selected' : ''}>${name}${excludedTag} (${email})</option>`;
+          html += `<option value="${email}" ${isSelected ? 'selected' : ''}>👤 ${name}${excludedTag} (${email})</option>`;
         }
       });
+
+      // If it IS assigned, but was not in state.performers list:
+      if (isAssigned && !matchFound) {
+        const displayName = getPerformerDisplayName(raw) || raw;
+        const displayLabel = raw.includes('@') ? `👤 ${displayName} (${raw})` : `👤 ${displayName}`;
+        html += `<option value="${raw}" selected>${displayLabel}</option>`;
+      }
+
       return html;
     }
 
@@ -5331,16 +5393,15 @@
             state.items[idx].assigned = newAssignedEmail;
           }
 
-          const targetName = newAssignedEmail ? getPerformerDisplayName(newAssignedEmail) : (state.language === 'es' ? 'No Asignado' : 'Unassigned');
+          const isNowAssigned = isItemAssigned(newAssignedEmail);
+          const targetName = isNowAssigned ? getPerformerDisplayName(newAssignedEmail) : (state.language === 'es' ? 'No Asignado' : 'Unassigned');
           showToast(`${dict.toastAssignedSuccess} ${targetName}`, "success");
           updateStats();
 
-          // If in filtered profile view (like unassigned or another performer), refresh list smoothly after 800ms
-          if (state.selectedPerformer === 'unassigned' || (state.selectedPerformer !== 'all' && state.selectedPerformer !== newAssignedEmail)) {
-            setTimeout(() => {
-              renderInventoryCards();
-            }, 800);
-          }
+          // Refresh cards so badges and labels immediately reflect the new assignee
+          setTimeout(() => {
+            renderInventoryCards();
+          }, 400);
         } else {
           showErrorAssigning(rowIndex, response ? response.error : "Unknown error");
         }
