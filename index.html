@@ -506,6 +506,14 @@
       flex-grow: 1;
     }
 
+    .item-title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.35rem;
+    }
+
     .item-title {
       font-size: 1.15rem;
       line-height: 1.4;
@@ -522,6 +530,36 @@
     .item-title a:hover {
       color: var(--accent-gold);
       text-decoration: underline;
+    }
+
+    .assigned-inline-row {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      margin-top: 0.65rem;
+    }
+
+    .assigned-inline-row .status-label {
+      color: var(--accent-gold);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    .assigned-inline-row .status-select-wrapper {
+      flex: 0 1 240px;
+      min-width: 170px;
+      max-width: 280px;
+    }
+
+    .assigned-inline-row .status-select {
+      height: 34px;
+      padding: 0.35rem 2rem 0.35rem 0.65rem;
+      font-size: 0.82rem;
+      border-color: rgba(245, 197, 66, 0.4);
     }
 
     /* Dropdown Selection Wrapper */
@@ -1013,7 +1051,8 @@
     }
     
     .item-grid.layout-list .item-info {
-      flex: 1 1 220px;
+      flex: 1.4 1 280px;
+      min-width: 220px;
     }
     
     .item-grid.layout-list .status-group {
@@ -1022,8 +1061,7 @@
     }
 
     .item-grid.layout-list .assigned-group {
-      flex: 1 1 180px;
-      min-width: 160px;
+      display: none;
     }
     
     .item-grid.layout-list .notes-group {
@@ -2488,9 +2526,10 @@
         toastSaveError: "Failed to save item: ",
         errorImageLoad: "Error loading image",
         errorDescRequired: "Item description is required.",
+        assignToLabel: "ASSIGN TO",
         assignToPerformer: "Assign to Performer:",
         assignedToLabel: "Assigned to:",
-        unassignedOption: "— (Unassigned / Available) —",
+        unassignedOption: "🔓 Unassigned / Available",
         batchAssignBtn: "Batch Assign",
         batchAssignBarTitle: "Batch Assignment",
         batchItemsSelected: "items selected",
@@ -2617,9 +2656,10 @@
         toastSaveError: "Error al guardar el artículo: ",
         errorImageLoad: "Error al cargar la imagen",
         errorDescRequired: "La descripción del artículo es obligatoria.",
+        assignToLabel: "ASIGNAR A",
         assignToPerformer: "Asignar a Bailarín:",
         assignedToLabel: "Asignado a:",
-        unassignedOption: "— (No Asignado / Disponible) —",
+        unassignedOption: "🔓 No Asignado / Disponible",
         batchAssignBtn: "Asignar en Lote",
         batchAssignBarTitle: "Asignación en Lote",
         batchItemsSelected: "artículos seleccionados",
@@ -2956,18 +2996,18 @@
             const pinStr = payload.pin.toString();
             const firstDigit = pinStr.charAt(0);
             if (firstDigit === '2' || firstDigit === '3') {
-              const isAdmin = firstDigit === '3';
-              const name = isAdmin ? "Director" : "Mock Dancer";
+              const isAdmin = true;
+              const name = "Admin / Director";
               successCallback({
                 success: true,
                 user: {
                   success: true,
                   email: payload.email,
                   name: name,
-                  performerId: isAdmin ? "TD-DIR" : "TD-004",
-                  clearance: isAdmin ? "director" : "performer",
+                  performerId: "TD-DIR",
+                  clearance: "director",
                   gender: "M",
-                  title: isAdmin ? "Artistic Director" : "Dancer"
+                  title: "Artistic Director"
                 },
                 initialData: {
                   email: payload.email,
@@ -3982,7 +4022,9 @@
             
             state.email = user.email;
             state.name = user.name;
-            state.isAdmin = user.clearance === 'director';
+            const pinVal = elements.performerPin ? elements.performerPin.value.trim() : '';
+            const firstDigit = pinVal ? pinVal.charAt(0) : '';
+            state.isAdmin = user.clearance === 'director' || firstDigit === '2' || firstDigit === '3' || !!initData.isAdminUser;
             state.items = initData.items || [];
             state.performers = initData.performersList || [];
             state.selectedPerformer = "all";
@@ -4797,18 +4839,31 @@
           </div>
           <div class="item-content">
             <div class="item-info">
-              <h3 class="item-title">${item.picUrl ? `<a href="${item.picUrl}" target="_blank" rel="noopener noreferrer">${item.description}</a>` : item.description}</h3>
+              <div class="item-title-row">
+                <h3 class="item-title" style="margin-bottom: 0;">${item.picUrl ? `<a href="${item.picUrl}" target="_blank" rel="noopener noreferrer">${item.description}</a>` : item.description}</h3>
+                <span class="meta-badge badge-location">${dict.locationLabel || 'Location:'} ${item.location || 'N/A'}</span>
+              </div>
               <div class="item-meta-badges">
                 <span class="meta-badge">ID: ${item.id || 'N/A'}</span>
                 <span class="meta-badge badge-gold">${dict.costLabel} ${formattedCost}</span>
                 <span class="meta-badge badge-type">${dict.typeLabel} ${item.type || 'General'}</span>
-                ${state.isAdmin ? (
-                  isAssigned ? 
-                    `<span class="meta-badge badge-assigned" style="color: var(--info-blue); border-color: rgba(59, 130, 246, 0.35); font-weight: 600;">👤 ${dict.assignedLabel} ${assignedName}</span>` :
-                    `<span class="meta-badge badge-unassigned" style="color: var(--warning-orange); border-color: rgba(245, 158, 11, 0.4); font-weight: 600;">🔓 ${dict.switcherUnassigned ? dict.switcherUnassigned.replace(/^[^\w\s]+/, '').trim() : 'Unassigned'}</span>`
-                ) : ''}
-                <span class="meta-badge badge-location">${dict.locationLabel || 'Location:'} ${item.location || 'N/A'}</span>
               </div>
+              ${state.isAdmin ? `
+                <div class="assigned-inline-row">
+                  <label class="status-label" style="display: flex; align-items: center; gap: 4px; color: var(--accent-gold); font-size: 0.78rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; margin: 0; white-space: nowrap;">
+                    <span>${dict.assignToLabel || 'ASSIGN TO'}</span>
+                  </label>
+                  <div class="status-select-wrapper" style="width: auto; flex: 0 1 240px; min-width: 170px; max-width: 280px;">
+                    <select class="status-select ${isAssigned ? 'val-assigned' : 'val-unset'}" id="assigned-select-${item.rowIndex}" onchange="saveItemAssignment(${item.rowIndex}, '${item.id}')" style="border-color: rgba(245, 197, 66, 0.4); padding: 0.35rem 2rem 0.35rem 0.65rem; font-size: 0.82rem; height: 34px;">
+                      ${getPerformerOptionsHtml(item.assigned)}
+                    </select>
+                  </div>
+                  <span id="sync-assigned-${item.rowIndex}" class="sync-status" style="margin-left: 0.25rem;">
+                    <span class="spinner" style="display:none; width:10px; height:10px; border-width:1.5px;"></span>
+                    <span>${dict.saved}</span>
+                  </span>
+                </div>
+              ` : ''}
             </div>
             
             <div class="status-group">
@@ -4834,28 +4889,6 @@
                 </select>
               </div>
             </div>
-
-            ${state.isAdmin ? `
-              <div class="assigned-group" style="margin-top: 0.75rem;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <label class="status-label" style="display:flex; align-items:center; gap: 5px; color: var(--accent-gold); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">
-                    <svg style="width: 14px; height: 14px; color: var(--accent-gold);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <span>${dict.assignToPerformer || 'Assign to Performer:'}</span>
-                  </label>
-                  <span id="sync-assigned-${item.rowIndex}" class="sync-status">
-                    <span class="spinner" style="display:none; width:10px; height:10px; border-width:1.5px;"></span>
-                    <span>${dict.saved}</span>
-                  </span>
-                </div>
-                <div class="status-select-wrapper">
-                  <select class="status-select ${isAssigned ? 'val-assigned' : 'val-unset'}" id="assigned-select-${item.rowIndex}" onchange="saveItemAssignment(${item.rowIndex}, '${item.id}')" style="border-color: rgba(245, 197, 66, 0.35);">
-                    ${getPerformerOptionsHtml(item.assigned)}
-                  </select>
-                </div>
-              </div>
-            ` : ''}
  
             <div class="notes-group">
               <label class="notes-label">

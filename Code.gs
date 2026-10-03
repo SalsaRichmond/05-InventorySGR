@@ -42,13 +42,21 @@ function isAdmin(email) {
         const headers = values[0].map(h => h.toString().toLowerCase().trim());
         const emailCol = headers.findIndex(h => h.includes("email") || h.includes("correo"));
         const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\\u00f3digo"));
-        if (emailCol !== -1 && pinCol !== -1) {
+        const roleCol = headers.findIndex(h => h.includes("role") || h.includes("title") || h.includes("puesto") || h.includes("t\\u00edtulo"));
+        if (emailCol !== -1) {
           for (let i = 1; i < values.length; i++) {
             const rowEmail = values[i][emailCol].toString().trim().toLowerCase();
             if (rowEmail === cleanEmail) {
-              const pin = values[i][pinCol].toString().trim();
-              if (pin && pin.charAt(0) === '3') {
+              const pin = pinCol !== -1 ? values[i][pinCol].toString().trim() : "";
+              const firstChar = pin ? pin.charAt(0) : "";
+              if (firstChar === '2' || firstChar === '3') {
                 return true;
+              }
+              if (roleCol !== -1) {
+                const role = values[i][roleCol].toString().trim().toLowerCase();
+                if (role.includes("admin") || role.includes("director")) {
+                  return true;
+                }
               }
               break;
             }
@@ -1493,13 +1501,12 @@ function validateCredentials(email, pin) {
   const registeredPin = userRow[pinCol].toString().trim();
   const firstDigit = pinStr.charAt(0);
   
-  if (registeredPin !== pinStr || (firstDigit !== '2' && firstDigit !== '3')) {
+  if (registeredPin !== pinStr) {
     throw new Error("I see you are writing from " + email + ", but I don't see that code associated to that email in our performer records. Carajo, did you forget your code?");
   }
   
   const name = nameCol !== -1 ? userRow[nameCol] : "Performer";
   const performerId = idCol !== -1 ? userRow[idCol] : "TD-UNKNOWN";
-  const clearance = firstDigit === '3' ? 'director' : 'performer';
   
   // Find gender and title columns dynamically
   const genderCol = headers.findIndex(h => h.includes("gender") || h.includes("g\\u00e9nero") || h.includes("sexo"));
@@ -1507,6 +1514,8 @@ function validateCredentials(email, pin) {
   
   const gender = genderCol !== -1 ? userRow[genderCol].toString().trim() : "";
   const title = titleCol !== -1 ? userRow[titleCol].toString().trim() : "";
+  const isAdminUser = (firstDigit === '2' || firstDigit === '3') || (title && (title.toLowerCase().includes('director') || title.toLowerCase().includes('admin')));
+  const clearance = isAdminUser ? 'director' : 'performer';
   
   return {
     success: true,
