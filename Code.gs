@@ -41,7 +41,7 @@ function isAdmin(email) {
       if (values.length > 1) {
         const headers = values[0].map(h => h.toString().toLowerCase().trim());
         const emailCol = headers.findIndex(h => h.includes("email") || h.includes("correo"));
-        const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("código"));
+        const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\\u00f3digo"));
         if (emailCol !== -1 && pinCol !== -1) {
           for (let i = 1; i < values.length; i++) {
             const rowEmail = values[i][emailCol].toString().trim().toLowerCase();
@@ -168,6 +168,25 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }
+    if (postData.action === "assignItems" || postData.action === "assignItem") {
+      const result = assignItemsToPerformer(
+        postData.adminEmail,
+        postData.items || [{ rowIndex: postData.rowIndex, id: postData.expectedId || postData.id, assigned: postData.performerEmail }],
+        postData.performerEmail
+      );
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    if (postData.action === "addPerformer") {
+      const result = addPerformer(postData.adminEmail, postData.performer);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    if (postData.action === "excludePerformer" || postData.action === "toggleExcludePerformer") {
+      const result = excludePerformer(postData.adminEmail, postData.performerEmail, postData.excluded !== undefined ? postData.excluded : true);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     if (postData.action === "requestAccessLink") {
       const result = requestAccessLink(postData.email);
       return ContentService.createTextOutput(JSON.stringify(result))
@@ -259,6 +278,52 @@ function getPerformerNameFromProfile(email) {
 }
 
 /**
+ * Resolves the set of excluded / inactive performer emails.
+ */
+function getExcludedPerformersSet() {
+  const excludedSet = {};
+  try {
+    const prop = PropertiesService.getScriptProperties().getProperty("EXCLUDED_PERFORMERS");
+    if (prop) {
+      const arr = JSON.parse(prop);
+      if (Array.isArray(arr)) {
+        arr.forEach(function(e) {
+          if (e) excludedSet[e.toString().trim().toLowerCase()] = true;
+        });
+      }
+    }
+  } catch (err) {
+    Logger.log("Failed reading EXCLUDED_PERFORMERS script property: " + err.toString());
+  }
+
+  try {
+    const ss = getMasterSourceSpreadsheet();
+    const profilesSheet = ss.getSheetByName("Profiles") || ss.getSheetByName("Profile") || ss.getSheetByName("Sheet1") || ss.getSheetByName("Crosswalk");
+    if (profilesSheet) {
+      const values = profilesSheet.getDataRange().getValues();
+      if (values.length > 1) {
+        const headers = values[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+        const emailCol = headers.findIndex(function(h) { return h.includes("email") || h.includes("correo"); });
+        const statusCol = headers.findIndex(function(h) { return h === "status" || h === "estado" || h === "active" || h === "activo" || h.includes("excluded") || h.includes("excluido"); });
+        if (emailCol !== -1 && statusCol !== -1) {
+          for (var i = 1; i < values.length; i++) {
+            var email = values[i][emailCol].toString().trim().toLowerCase();
+            var val = values[i][statusCol].toString().trim().toLowerCase();
+            if (val === "excluded" || val === "excluido" || val === "inactive" || val === "inactivo" || val === "false" || val === "no") {
+              if (email) excludedSet[email] = true;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log("Failed reading Profiles status column: " + err.toString());
+  }
+
+  return excludedSet;
+}
+
+/**
  * Scans the inventory sheet for all unique performer emails,
  * resolves names from Profiles sheet where possible, and returns a sorted list.
  */
@@ -276,8 +341,10 @@ function getPerformersList() {
     if (assignedCol === -1) return [];
     
     const emailToName = {};
+    const emailToRole = {};
+    const uniqueEmails = {};
     
-    // Scan profiles to map emails to names
+    // Scan profiles to map emails to names and include all company members
     try {
       const profilesSS = getMasterSourceSpreadsheet();
       const profilesSheet = profilesSS.getSheetByName("Profiles") || profilesSS.getSheetByName("Profile") || profilesSS.getSheetByName("Sheet1") || profilesSS.getSheetByName("Crosswalk");
@@ -288,12 +355,16 @@ function getPerformersList() {
           const emailCol = profileHeaders.findIndex(h => h.includes("email") || h.includes("correo"));
           const nameCol = profileHeaders.findIndex(h => (h.includes("name") || h.includes("nombre") || h.includes("fullname") || h.includes("full name")) && 
                                                 !h.includes("contact") && !h.includes("emergency"));
-          if (emailCol !== -1 && nameCol !== -1) {
+          const roleCol = profileHeaders.findIndex(h => h.includes("role") || h.includes("title") || h.includes("puesto") || h.includes("t\u00edtulo"));
+          if (emailCol !== -1) {
             for (let i = 1; i < profileValues.length; i++) {
               const email = profileValues[i][emailCol].toString().trim().toLowerCase();
-              const name = profileValues[i][nameCol].toString().trim();
-              if (email) {
-                emailToName[email] = name;
+              const name = nameCol !== -1 ? profileValues[i][nameCol].toString().trim() : "";
+              const role = roleCol !== -1 ? profileValues[i][roleCol].toString().trim() : "Dancer";
+              if (email && email.indexOf("@") !== -1) {
+                if (name) emailToName[email] = name;
+                if (role) emailToRole[email] = role;
+                uniqueEmails[email] = true;
               }
             }
           }
@@ -303,7 +374,6 @@ function getPerformersList() {
       Logger.log("Failed to load names from Profiles in getPerformersList: " + e.toString());
     }
     
-    const uniqueEmails = {};
     for (let i = 1; i < values.length; i++) {
       if (values[i].length > assignedCol) {
         const email = values[i][assignedCol].toString().trim().toLowerCase();
@@ -313,10 +383,13 @@ function getPerformersList() {
       }
     }
     
+    const excludedSet = getExcludedPerformersSet();
     const list = Object.keys(uniqueEmails).map(email => {
       return {
         email: email,
-        name: emailToName[email] || formatEmailToName(email)
+        name: emailToName[email] || formatEmailToName(email),
+        role: emailToRole[email] || "Dancer",
+        excluded: !!excludedSet[email]
       };
     });
     
@@ -325,6 +398,192 @@ function getPerformersList() {
   } catch (err) {
     Logger.log("Error in getPerformersList: " + err.toString());
     return [];
+  }
+}
+
+/**
+ * Adds a new performer to the Profiles sheet roster, or updates them if already existing.
+ */
+function addPerformer(adminEmail, performerData) {
+  try {
+    if (!isAdmin(adminEmail)) {
+      throw new Error("Unauthorized access. Admin privileges required.");
+    }
+    if (!performerData || !performerData.email) {
+      throw new Error("Performer email address is required.");
+    }
+    const cleanEmail = performerData.email.trim().toLowerCase();
+    if (!cleanEmail.includes("@")) {
+      throw new Error("Please enter a valid email address.");
+    }
+    const cleanName = (performerData.name || formatEmailToName(cleanEmail)).trim();
+    const cleanPin = (performerData.pin ? performerData.pin.toString().trim() : ("20" + Math.floor(10 + Math.random() * 90)));
+    const cleanRole = (performerData.role || performerData.title || "Dancer").trim();
+    const cleanGender = (performerData.gender || "").trim();
+
+    const ss = getMasterSourceSpreadsheet();
+    let profilesSheet = ss.getSheetByName("Profiles") || ss.getSheetByName("Profile") || ss.getSheetByName("Sheet1") || ss.getSheetByName("Crosswalk");
+    if (!profilesSheet) {
+      profilesSheet = ss.insertSheet("Profiles");
+      profilesSheet.appendRow(["Performer ID", "Full Name", "Email", "PIN", "Role", "Gender", "Status"]);
+    }
+
+    const values = profilesSheet.getDataRange().getValues();
+    const headers = values[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    let emailCol = headers.findIndex(function(h) { return h.includes("email") || h.includes("correo"); });
+    let nameCol = headers.findIndex(function(h) { return (h.includes("name") || h.includes("nombre") || h.includes("fullname")) && !h.includes("contact") && !h.includes("emergency"); });
+    let pinCol = headers.findIndex(function(h) { return h.includes("pin") || h.includes("code") || h.includes("c\u00f3digo"); });
+    let idCol = headers.findIndex(function(h) { return h === "id" || h === "performer_id" || h === "performer id" || h === "member id"; });
+    let roleCol = headers.findIndex(function(h) { return h.includes("role") || h.includes("title") || h.includes("puesto") || h.includes("t\u00edtulo"); });
+    let genderCol = headers.findIndex(function(h) { return h.includes("gender") || h.includes("g\u00e9nero") || h.includes("sexo"); });
+    let statusCol = headers.findIndex(function(h) { return h === "status" || h === "estado" || h === "active" || h === "activo"; });
+
+    if (statusCol === -1) {
+      statusCol = profilesSheet.getLastColumn();
+      profilesSheet.getRange(1, statusCol + 1).setValue("Status");
+      headers.push("status");
+    }
+
+    let existingRow = -1;
+    let maxIdNum = 0;
+    if (emailCol !== -1) {
+      for (let i = 1; i < values.length; i++) {
+        const rowEmail = values[i][emailCol].toString().trim().toLowerCase();
+        if (rowEmail === cleanEmail) {
+          existingRow = i + 1;
+          break;
+        }
+        if (idCol !== -1) {
+          const rowId = values[i][idCol].toString().replace(/\D/g, '');
+          const parsed = parseInt(rowId, 10);
+          if (!isNaN(parsed) && parsed > maxIdNum) maxIdNum = parsed;
+        }
+      }
+    }
+
+    if (existingRow !== -1) {
+      if (nameCol !== -1 && cleanName) profilesSheet.getRange(existingRow, nameCol + 1).setValue(cleanName);
+      if (pinCol !== -1 && cleanPin) profilesSheet.getRange(existingRow, pinCol + 1).setValue(cleanPin);
+      if (roleCol !== -1 && cleanRole) profilesSheet.getRange(existingRow, roleCol + 1).setValue(cleanRole);
+      if (statusCol !== -1) profilesSheet.getRange(existingRow, statusCol + 1).setValue("Active");
+      
+      excludePerformer(adminEmail, cleanEmail, false);
+
+      return {
+        success: true,
+        updated: true,
+        performer: {
+          email: cleanEmail,
+          name: cleanName,
+          pin: cleanPin,
+          role: cleanRole,
+          excluded: false
+        }
+      };
+    }
+
+    const newPerformerId = "TD-" + String(maxIdNum + 1).padStart(3, '0');
+    const newRow = new Array(Math.max(profilesSheet.getLastColumn(), 7)).fill("");
+    if (idCol !== -1) newRow[idCol] = newPerformerId;
+    if (nameCol !== -1) newRow[nameCol] = cleanName;
+    if (emailCol !== -1) newRow[emailCol] = cleanEmail;
+    if (pinCol !== -1) newRow[pinCol] = cleanPin;
+    if (roleCol !== -1) newRow[roleCol] = cleanRole;
+    if (genderCol !== -1) newRow[genderCol] = cleanGender;
+    if (statusCol !== -1) newRow[statusCol] = "Active";
+
+    profilesSheet.appendRow(newRow);
+
+    excludePerformer(adminEmail, cleanEmail, false);
+
+    return {
+      success: true,
+      added: true,
+      performer: {
+        id: newPerformerId,
+        email: cleanEmail,
+        name: cleanName,
+        pin: cleanPin,
+        role: cleanRole,
+        excluded: false
+      }
+    };
+  } catch (err) {
+    Logger.log("Error in addPerformer: " + err.toString());
+    return {
+      success: false,
+      error: err.message || err.toString()
+    };
+  }
+}
+
+/**
+ * Excludes or re-includes a performer from active duty, switcher, and assignment selectors.
+ */
+function excludePerformer(adminEmail, targetEmail, isExcluded) {
+  try {
+    if (!isAdmin(adminEmail)) {
+      throw new Error("Unauthorized access. Admin privileges required.");
+    }
+    if (!targetEmail) {
+      throw new Error("Target performer email is required.");
+    }
+    const cleanEmail = targetEmail.trim().toLowerCase();
+    const shouldExclude = (isExcluded === true || isExcluded === "true");
+
+    try {
+      const prop = PropertiesService.getScriptProperties().getProperty("EXCLUDED_PERFORMERS");
+      let arr = prop ? JSON.parse(prop) : [];
+      if (!Array.isArray(arr)) arr = [];
+      const idx = arr.indexOf(cleanEmail);
+      if (shouldExclude && idx === -1) {
+        arr.push(cleanEmail);
+      } else if (!shouldExclude && idx !== -1) {
+        arr.splice(idx, 1);
+      }
+      PropertiesService.getScriptProperties().setProperty("EXCLUDED_PERFORMERS", JSON.stringify(arr));
+    } catch (err) {
+      Logger.log("Error updating ScriptProperties EXCLUDED_PERFORMERS: " + err.toString());
+    }
+
+    try {
+      const ss = getMasterSourceSpreadsheet();
+      const profilesSheet = ss.getSheetByName("Profiles") || ss.getSheetByName("Profile") || ss.getSheetByName("Sheet1") || ss.getSheetByName("Crosswalk");
+      if (profilesSheet) {
+        const values = profilesSheet.getDataRange().getValues();
+        if (values.length > 1) {
+          const headers = values[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+          const emailCol = headers.findIndex(function(h) { return h.includes("email") || h.includes("correo"); });
+          let statusCol = headers.findIndex(function(h) { return h === "status" || h === "estado" || h === "active" || h === "activo"; });
+          if (statusCol === -1) {
+            statusCol = profilesSheet.getLastColumn();
+            profilesSheet.getRange(1, statusCol + 1).setValue("Status");
+          }
+          if (emailCol !== -1 && statusCol !== -1) {
+            for (let i = 1; i < values.length; i++) {
+              if (values[i][emailCol].toString().trim().toLowerCase() === cleanEmail) {
+                profilesSheet.getRange(i + 1, statusCol + 1).setValue(shouldExclude ? "Excluded" : "Active");
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      Logger.log("Error updating Profiles sheet status: " + err.toString());
+    }
+
+    return {
+      success: true,
+      email: cleanEmail,
+      excluded: shouldExclude
+    };
+  } catch (err) {
+    Logger.log("Error in excludePerformer: " + err.toString());
+    return {
+      success: false,
+      error: err.message || err.toString()
+    };
   }
 }
 
@@ -658,6 +917,88 @@ function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNote
     return {
       success: false,
       error: error.message || error.toString()
+    };
+  }
+}
+
+/**
+ * Assigns one or more items to a specified performer (or clears assignment).
+ */
+function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail) {
+  try {
+    if (!isAdmin(adminEmail)) {
+      throw new Error("Unauthorized access. Admin privileges required.");
+    }
+    
+    if (!items || !Array.isArray(items)) {
+      throw new Error("Invalid items payload for assignment.");
+    }
+    
+    const ss = getInventorySpreadsheet();
+    const sheet = ss.getSheetByName("Inventory") || ss.getSheets()[0];
+    if (!sheet) {
+      throw new Error("Inventory database sheet not found.");
+    }
+    
+    const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+    const lowerHeaders = headers.map(h => h.toString().toLowerCase().trim());
+    
+    const idCol = lowerHeaders.indexOf("id");
+    const assignedCol = lowerHeaders.indexOf("assigned");
+    if (assignedCol === -1) {
+      throw new Error("System Error: 'Assigned' column was not found in the spreadsheet headers.");
+    }
+    
+    const values = sheet.getDataRange().getValues();
+    const idRowMap = {};
+    for (let i = 1; i < values.length; i++) {
+      if (idCol !== -1 && values[i].length > idCol) {
+        const rowId = values[i][idCol].toString().trim();
+        if (rowId) {
+          idRowMap[rowId] = i + 1; // 1-based row index
+        }
+      }
+    }
+    
+    let updatedCount = 0;
+    for (let j = 0; j < items.length; j++) {
+      const it = items[j];
+      const targetPerformer = (it.assigned !== undefined ? it.assigned : (defaultPerformerEmail || "")).trim().toLowerCase();
+      let targetRow = -1;
+      
+      const expectedId = it.id ? it.id.toString().trim() : "";
+      const rowIndex = it.rowIndex ? parseInt(it.rowIndex, 10) : -1;
+      
+      // Verify row with Shift Guard
+      if (rowIndex > 1 && rowIndex <= sheet.getLastRow()) {
+        if (idCol !== -1 && values[rowIndex - 1]) {
+          const actualId = values[rowIndex - 1][idCol].toString().trim();
+          if (actualId === expectedId) {
+            targetRow = rowIndex;
+          }
+        }
+      }
+      
+      // Fallback to ID map if row index shifted or was not provided
+      if (targetRow === -1 && expectedId && idRowMap[expectedId]) {
+        targetRow = idRowMap[expectedId];
+      }
+      
+      if (targetRow !== -1) {
+        sheet.getRange(targetRow, assignedCol + 1).setValue(targetPerformer);
+        updatedCount++;
+      }
+    }
+    
+    return {
+      success: true,
+      updated: updatedCount
+    };
+  } catch (err) {
+    Logger.log("Error in assignItemsToPerformer: " + err.toString());
+    return {
+      success: false,
+      error: err.message || err.toString()
     };
   }
 }
@@ -1120,7 +1461,7 @@ function validateCredentials(email, pin) {
   // Find column indexes strictly by dynamic header strings (column position agnostic)
   const headers = values[0].map(h => h.toString().toLowerCase().trim());
   const emailCol = headers.findIndex(h => h.includes("email") || h.includes("correo"));
-  const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("código"));
+  const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\\u00f3digo"));
   
   // Specific header exclusions to avoid collisions
   const nameCol = headers.findIndex(h => (h.includes("name") || h.includes("nombre") || h.includes("fullname") || h.includes("full name")) && 
@@ -1161,8 +1502,8 @@ function validateCredentials(email, pin) {
   const clearance = firstDigit === '3' ? 'director' : 'performer';
   
   // Find gender and title columns dynamically
-  const genderCol = headers.findIndex(h => h.includes("gender") || h.includes("género") || h.includes("sexo"));
-  const titleCol = headers.findIndex(h => h.includes("title") || h.includes("título") || h.includes("role") || h.includes("puesto") || /\brol\b/.test(h));
+  const genderCol = headers.findIndex(h => h.includes("gender") || h.includes("g\\u00e9nero") || h.includes("sexo"));
+  const titleCol = headers.findIndex(h => h.includes("title") || h.includes("t\\u00edtulo") || h.includes("role") || h.includes("puesto") || /\brol\b/.test(h));
   
   const gender = genderCol !== -1 ? userRow[genderCol].toString().trim() : "";
   const title = titleCol !== -1 ? userRow[titleCol].toString().trim() : "";
@@ -1203,7 +1544,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
     
     // Formatting the name from email
     const performerName = formatEmailToName(recipientEmail);
-    const subject = `Tradición Inventory Checklist — ${performerName}`;
+    const subject = `Tradici\\u00f3n Inventory Checklist \\u2014 ${performerName}`;
     
     let tableRowsHtml = "";
     items.forEach(item => {
@@ -1233,7 +1574,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
     const body = `
       <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #ffffff;">
         <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 20px; margin-bottom: 25px;">
-          <h2 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Tradición Costume & Prop Checklist</h2>
+          <h2 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Tradici\\u00f3n Costume & Prop Checklist</h2>
           <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Authoritative Performer Ledger</p>
         </div>
         
@@ -1262,7 +1603,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
         
         <div style="margin-top: 35px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px;">
           <p style="font-size: 12px; color: #94a3b8; margin: 0;">Salsa Guy Richmond, LLC / Tradici&oacute;n Dance Company</p>
-          <p style="font-size: 12px; color: #ef4444; font-weight: bold; margin-top: 5px;">Smile, Jesus loves you 🙂</p>
+          <p style="font-size: 12px; color: #ef4444; font-weight: bold; margin-top: 5px;">Smile, Jesus loves you \\ud83d\\ude42</p>
         </div>
       </div>
     `;
@@ -1525,7 +1866,7 @@ function clearAllValidations() {
  * Re-creates the Data Validation rules (dropdowns) for the Type and Location columns
  * in the "Inventory" sheet.
  * Filters out invalid hyphens "-", sorts options alphabetically, and ensures 
- * "— (Unassigned)" is listed as the default.
+ * "\\u2014 (Unassigned)" is listed as the default.
  */
 function recreateValidations() {
   try {
@@ -1578,7 +1919,7 @@ function recreateValidations() {
         uniqueTypes.push("General");
       }
       uniqueTypes.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-      uniqueTypes.unshift("— (Unassigned)");
+      uniqueTypes.unshift("\\u2014 (Unassigned)");
       
       const typeRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(uniqueTypes, true)
@@ -1592,7 +1933,7 @@ function recreateValidations() {
     // 2. Recreate Location Validation
     if (locationCol !== -1) {
       const locations = [
-        "— (Unassigned)",
+        "\\u2014 (Unassigned)",
         "Office",
         "Plastic Shed Backyard",
         "Shed Left Wall",
@@ -1645,11 +1986,11 @@ function recreateValidations() {
       // Sort emails alphabetically
       performerEmails.sort();
       
-      // Add standard options like "AVAILABLE" and "— (Unassigned)"
+      // Add standard options like "AVAILABLE" and "\\u2014 (Unassigned)"
       if (performerEmails.indexOf("AVAILABLE") === -1) {
         performerEmails.unshift("AVAILABLE");
       }
-      performerEmails.unshift("— (Unassigned)");
+      performerEmails.unshift("\\u2014 (Unassigned)");
       
       const assignedRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(performerEmails, true)
@@ -1663,7 +2004,7 @@ function recreateValidations() {
     // 4. Recreate Sex Validation
     if (sexCol !== -1) {
       const sexOptions = [
-        "— (Not Set)",
+        "\\u2014 (Not Set)",
         "All",
         "Boy",
         "Girl",
