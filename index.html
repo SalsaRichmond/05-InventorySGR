@@ -4864,8 +4864,6 @@
           ` : ''}
           <div class="item-image-box" onclick="${state.batchMode ? `toggleCardSelection(${item.rowIndex}, event)` : `zoomImage('${convertedImgUrl}', '${item.description}')`}">
             ${imageHtml}
-            <span class="id-tag">ID: ${item.id || 'N/A'}</span>
-            <span class="cost-tag">${dict.costLabel} ${formattedCost}</span>
           </div>
           <div class="item-content">
             <div class="item-info">
