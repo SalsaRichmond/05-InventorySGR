@@ -3268,6 +3268,7 @@
       isAdmin: IS_ADMIN,
       performers: INITIAL_PERFORMERS,
       selectedPerformer: 'all',
+      pin: '',
       language: 'en',
       loginMode: 'pin',
       statusFilter: 'all',
@@ -4051,6 +4052,7 @@
             
             state.email = user.email;
             state.name = user.name;
+            state.pin = pin;
             const pinVal = elements.performerPin ? elements.performerPin.value.trim() : '';
             const firstDigit = pinVal ? pinVal.charAt(0) : '';
             state.isAdmin = user.clearance === 'director' || firstDigit === '2' || firstDigit === '3' || !!initData.isAdminUser;
@@ -5368,6 +5370,13 @@
         selectElement.classList.add('val-unset');
       }
 
+      // Optimistically update local state so card does not prematurely revert
+      const idx = state.items.findIndex(it => (it.rowIndex && parseInt(it.rowIndex, 10) === parseInt(rowIndex, 10)) || (it.id && itemId && it.id.toString() === itemId.toString()));
+      const previousAssigned = idx !== -1 ? state.items[idx].assigned : '';
+      if (idx !== -1) {
+        state.items[idx].assigned = newAssignedEmail;
+      }
+
       if (statusIndicator) {
         statusIndicator.className = "sync-status active saving";
         statusIndicator.querySelector('span:last-child').textContent = dict.saving;
@@ -5387,12 +5396,6 @@
             }, 2000);
           }
 
-          // Update local state item
-          const idx = state.items.findIndex(it => it.rowIndex === rowIndex || (it.id && it.id.toString() === itemId.toString()));
-          if (idx !== -1) {
-            state.items[idx].assigned = newAssignedEmail;
-          }
-
           const isNowAssigned = isItemAssigned(newAssignedEmail);
           const targetName = isNowAssigned ? getPerformerDisplayName(newAssignedEmail) : (state.language === 'es' ? 'No Asignado' : 'Unassigned');
           showToast(`${dict.toastAssignedSuccess} ${targetName}`, "success");
@@ -5403,6 +5406,10 @@
             renderInventoryCards();
           }, 400);
         } else {
+          if (idx !== -1) {
+            state.items[idx].assigned = previousAssigned;
+          }
+          selectElement.value = previousAssigned;
           showErrorAssigning(rowIndex, response ? response.error : "Unknown error");
         }
       };
@@ -5411,14 +5418,20 @@
         // Fallback to uploadInventory in case backend has not reloaded
         callAPI('uploadInventory', {
           adminEmail: state.email,
+          pin: state.pin,
           items: [{ id: itemId, assigned: newAssignedEmail }]
         }, onDone, (err2) => {
+          if (idx !== -1) {
+            state.items[idx].assigned = previousAssigned;
+          }
+          selectElement.value = previousAssigned;
           showErrorAssigning(rowIndex, err2.toString());
         });
       };
 
       callAPI('assignItems', {
         adminEmail: state.email,
+        pin: state.pin,
         items: [{ rowIndex: rowIndex, id: itemId, assigned: newAssignedEmail }],
         performerEmail: newAssignedEmail
       }, onDone, onError);

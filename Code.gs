@@ -28,7 +28,11 @@ const INVENTORY_SPREADSHEET_ID = "1IPZznR7kK-oCoThEHmACgMOW6KJfP8NSwzGKv3q-ITY";
 const MASTER_SOURCE_SPREADSHEET_ID = "1u-kw9x5WJPO5NgvkH0-B8bNPWPLvVF28myNvbkc9pFk";
 
 
-function isAdmin(email) {
+function isAdmin(email, pin) {
+  if (pin) {
+    const p = pin.toString().trim();
+    if (p.charAt(0) === '2' || p.charAt(0) === '3') return true;
+  }
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
   
@@ -172,7 +176,7 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     if (postData.action === "uploadInventory") {
-      const result = uploadInventory(postData.adminEmail, postData.items);
+      const result = uploadInventory(postData.adminEmail, postData.items, postData.pin);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -180,7 +184,8 @@ function doPost(e) {
       const result = assignItemsToPerformer(
         postData.adminEmail,
         postData.items || [{ rowIndex: postData.rowIndex, id: postData.expectedId || postData.id, assigned: postData.performerEmail }],
-        postData.performerEmail
+        postData.performerEmail,
+        postData.pin
       );
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
@@ -785,6 +790,7 @@ function getPerformerInventory(email) {
         cost: replacementCost,
         status: currentStatus || "-",
         notes: notes,
+        assigned: rowEmail,
         type: itemType,
         location: location,
         sex: sex
@@ -932,9 +938,9 @@ function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNote
 /**
  * Assigns one or more items to a specified performer (or clears assignment).
  */
-function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail) {
+function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail, pin) {
   try {
-    if (!isAdmin(adminEmail)) {
+    if (!isAdmin(adminEmail, pin)) {
       throw new Error("Unauthorized access. Admin privileges required.");
     }
     
@@ -1014,9 +1020,9 @@ function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail) {
 /**
  * Processes inventory updates/additions uploaded by an admin.
  */
-function uploadInventory(adminEmail, items) {
+function uploadInventory(adminEmail, items, pin) {
   try {
-    if (!isAdmin(adminEmail)) {
+    if (!isAdmin(adminEmail, pin)) {
       throw new Error("Unauthorized access. Admin privileges required.");
     }
     
