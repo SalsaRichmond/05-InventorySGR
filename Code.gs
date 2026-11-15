@@ -31,7 +31,8 @@ const MASTER_SOURCE_SPREADSHEET_ID = "1u-kw9x5WJPO5NgvkH0-B8bNPWPLvVF28myNvbkc9p
 function isAdmin(email, pin) {
   if (pin) {
     const p = pin.toString().trim();
-    if (p.charAt(0) === '2' || p.charAt(0) === '3') return true;
+    if (p.charAt(0) === '3') return true;
+    if (p.charAt(0) === '2') return false;
   }
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
@@ -51,9 +52,9 @@ function isAdmin(email, pin) {
           for (let i = 1; i < values.length; i++) {
             const rowEmail = values[i][emailCol].toString().trim().toLowerCase();
             if (rowEmail === cleanEmail) {
-              const pin = pinCol !== -1 ? values[i][pinCol].toString().trim() : "";
-              const firstChar = pin ? pin.charAt(0) : "";
-              if (firstChar === '2' || firstChar === '3') {
+              const rowPin = pinCol !== -1 ? values[i][pinCol].toString().trim() : "";
+              const firstChar = rowPin ? rowPin.charAt(0) : "";
+              if (firstChar === '3') {
                 return true;
               }
               if (roleCol !== -1) {
@@ -119,7 +120,7 @@ function doGet(e) {
   }
 
   // Otherwise, redirect to the GitHub Pages hosted frontend
-  const gitHubPagesUrl = "https://salsaguy-debug.github.io/InventorySGR/";
+  const gitHubPagesUrl = "https://salsarichmond.github.io/05-InventorySGR/";
   let queryParams = "";
   if (e && e.queryString) {
     queryParams = "?" + e.queryString;
@@ -1520,7 +1521,7 @@ function validateCredentials(email, pin) {
   
   const gender = genderCol !== -1 ? userRow[genderCol].toString().trim() : "";
   const title = titleCol !== -1 ? userRow[titleCol].toString().trim() : "";
-  const isAdminUser = (firstDigit === '2' || firstDigit === '3') || (title && (title.toLowerCase().includes('director') || title.toLowerCase().includes('admin')));
+  const isAdminUser = (firstDigit === '3') || (title && (title.toLowerCase().includes('director') || title.toLowerCase().includes('admin')));
   const clearance = isAdminUser ? 'director' : 'performer';
   
   return {

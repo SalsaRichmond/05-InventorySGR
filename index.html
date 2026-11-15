@@ -1944,7 +1944,7 @@
         <div class="brand-title-group">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span class="brand-title">El Patrón</span>
-            <span class="role-badge">DIR</span>
+            <span class="role-badge" id="headerRoleBadge" style="display: none;">DIR</span>
           </div>
           <span class="brand-subtitle">Tradici&#xf3;n Inventory</span>
         </div>
@@ -3518,10 +3518,23 @@
       }
       
       state.email = response.email;
-      state.items = response.items || [];
-      state.name = response.performerName;
-      state.isAdmin = response.isAdminUser;
-      state.performers = response.performersList || [];
+      const cleanInitEmail = (state.email || '').trim().toLowerCase();
+      const allPerf = response.performersList || [];
+      const matchedPerf = allPerf.find(p => p && p.email && p.email.trim().toLowerCase() === cleanInitEmail);
+      const hasAdminRole = matchedPerf && matchedPerf.role && (matchedPerf.role.toLowerCase().includes('admin') || matchedPerf.role.toLowerCase().includes('director'));
+      const isKnownAdminEmail = ['rodriguez2113@gmail.com', 'darienl140@gmail.com', 'andrep2306@gmail.com'].includes(cleanInitEmail);
+      state.isAdmin = !!response.isAdminUser && (isKnownAdminEmail || !!hasAdminRole || !matchedPerf);
+
+      const rawItems = response.items || [];
+      if (state.isAdmin) {
+        state.items = rawItems;
+        state.performers = allPerf;
+        state.name = response.performerName;
+      } else {
+        state.items = rawItems.filter(it => it && (it.assigned !== undefined ? it.assigned.trim().toLowerCase() === cleanInitEmail : true));
+        state.performers = [];
+        state.name = (matchedPerf && matchedPerf.name) ? matchedPerf.name : (response.performerName && response.performerName !== 'Director' ? response.performerName : formatEmailToName(cleanInitEmail));
+      }
       state.selectedPerformer = "all";
       state.statusFilter = "all";
       
@@ -3996,6 +4009,8 @@
 
     // Render Portal Login Access Form
     function renderLogin() {
+      const headerRoleBadge = document.getElementById('headerRoleBadge');
+      if (headerRoleBadge) headerRoleBadge.style.display = 'none';
       elements.loginView.style.display = 'flex';
       elements.dashboardView.style.display = 'none';
       elements.viewSelectContainer.style.display = 'none';
@@ -4055,9 +4070,17 @@
             state.pin = pin;
             const pinVal = elements.performerPin ? elements.performerPin.value.trim() : '';
             const firstDigit = pinVal ? pinVal.charAt(0) : '';
-            state.isAdmin = user.clearance === 'director' || firstDigit === '2' || firstDigit === '3' || !!initData.isAdminUser;
-            state.items = initData.items || [];
-            state.performers = initData.performersList || [];
+            const isRoleAdmin = user.title && (user.title.toLowerCase().includes('director') || user.title.toLowerCase().includes('admin'));
+            state.isAdmin = firstDigit === '3' || !!isRoleAdmin;
+            const allLoadedItems = initData.items || [];
+            if (state.isAdmin) {
+              state.items = allLoadedItems;
+              state.performers = initData.performersList || [];
+            } else {
+              const cleanUserEmail = (state.email || '').trim().toLowerCase();
+              state.items = allLoadedItems.filter(it => it && (it.assigned !== undefined ? it.assigned.trim().toLowerCase() === cleanUserEmail : true));
+              state.performers = [];
+            }
             state.selectedPerformer = "all";
             
             elements.performerEmail.value = "";
@@ -4152,7 +4175,9 @@
       elements.drawerViewSelect.value = state.view;
 
       // Setup Administrator switcher
+      const headerRoleBadge = document.getElementById('headerRoleBadge');
       if (state.isAdmin) {
+        if (headerRoleBadge) headerRoleBadge.style.display = 'inline-block';
         elements.performerSelectContainer.style.display = 'block';
         elements.drawerPerformerSelectContainer.style.display = 'block';
         if (elements.uploadInventoryBtn) elements.uploadInventoryBtn.style.display = 'inline-flex';
@@ -4163,6 +4188,7 @@
           populatePerformerSelect();
         }
       } else {
+        if (headerRoleBadge) headerRoleBadge.style.display = 'none';
         elements.performerSelectContainer.style.display = 'none';
         elements.drawerPerformerSelectContainer.style.display = 'none';
         if (elements.uploadInventoryBtn) elements.uploadInventoryBtn.style.display = 'none';
@@ -4195,7 +4221,13 @@
       const currentSelection = elements.typeFilterSelect.value || 'all';
       elements.typeFilterSelect.innerHTML = `<option value="all">${dict.allTypes}</option>`;
       
-      const itemsList = Array.isArray(state.items) ? state.items : [];
+      const itemsList = (Array.isArray(state.items) ? state.items : []).filter(item => {
+        if (!item) return false;
+        if (!state.isAdmin && state.email && item.assigned !== undefined) {
+          return item.assigned.trim().toLowerCase() === state.email.trim().toLowerCase();
+        }
+        return true;
+      });
       const types = new Set();
       
       itemsList.forEach(item => {
@@ -4222,6 +4254,10 @@
 
     function updateStats() {
       let itemsList = Array.isArray(state.items) ? [...state.items] : [];
+      if (!state.isAdmin && state.email) {
+        const cleanUserEmail = state.email.trim().toLowerCase();
+        itemsList = itemsList.filter(item => item && (item.assigned !== undefined ? item.assigned.trim().toLowerCase() === cleanUserEmail : true));
+      }
       
       // Filter by Type
       const selectedType = elements.typeFilterSelect ? elements.typeFilterSelect.value : 'all';
@@ -4285,6 +4321,10 @@
 
     function getFilteredItems() {
       let itemsList = Array.isArray(state.items) ? [...state.items] : [];
+      if (!state.isAdmin && state.email) {
+        const cleanUserEmail = state.email.trim().toLowerCase();
+        itemsList = itemsList.filter(item => item && (item.assigned !== undefined ? item.assigned.trim().toLowerCase() === cleanUserEmail : true));
+      }
 
       // Filter by Type
       const selectedType = elements.typeFilterSelect ? elements.typeFilterSelect.value : 'all';
