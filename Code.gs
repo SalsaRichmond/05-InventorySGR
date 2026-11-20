@@ -46,8 +46,8 @@ function isAdmin(email, pin) {
       if (values.length > 1) {
         const headers = values[0].map(h => h.toString().toLowerCase().trim());
         const emailCol = headers.findIndex(h => h.includes("email") || h.includes("correo"));
-        const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\\u00f3digo"));
-        const roleCol = headers.findIndex(h => h.includes("role") || h.includes("title") || h.includes("puesto") || h.includes("t\\u00edtulo"));
+        const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\u00f3digo"));
+        const roleCol = headers.findIndex(h => h.includes("role") || h.includes("title") || h.includes("puesto") || h.includes("t\u00edtulo"));
         if (emailCol !== -1) {
           for (let i = 1; i < values.length; i++) {
             const rowEmail = values[i][emailCol].toString().trim().toLowerCase();
@@ -113,10 +113,17 @@ function doGet(e) {
 
   // If this is an admin switcher API request to load another performer's profile
   if (action === "getPerformerInventoryForAdmin") {
-    let selectedEmail = e.parameter.selectedEmail ? e.parameter.selectedEmail.trim().toLowerCase() : "";
-    const data = getPerformerInventoryForAdmin(email, selectedEmail);
-    return ContentService.createTextOutput(JSON.stringify(data))
-      .setMimeType(ContentService.MimeType.JSON);
+    try {
+      let selectedEmail = e.parameter.selectedEmail ? e.parameter.selectedEmail.trim().toLowerCase() : "";
+      const data = getPerformerInventoryForAdmin(email, selectedEmail);
+      return ContentService.createTextOutput(JSON.stringify(data))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: err.message || err.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
   }
 
   // Otherwise, redirect to the GitHub Pages hosted frontend
@@ -199,12 +206,17 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     if (postData.action === "addPerformer") {
-      const result = addPerformer(postData.adminEmail, postData.performer);
+      const result = addPerformer(postData.adminEmail, postData.performer, postData.pin);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }
     if (postData.action === "excludePerformer" || postData.action === "toggleExcludePerformer") {
-      const result = excludePerformer(postData.adminEmail, postData.performerEmail, postData.excluded !== undefined ? postData.excluded : true);
+      const result = excludePerformer(
+        postData.adminEmail,
+        postData.performerEmail,
+        postData.excluded !== undefined ? postData.excluded : true,
+        postData.pin
+      );
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -425,9 +437,9 @@ function getPerformersList() {
 /**
  * Adds a new performer to the Profiles sheet roster, or updates them if already existing.
  */
-function addPerformer(adminEmail, performerData) {
+function addPerformer(adminEmail, performerData, pin) {
   try {
-    if (!isAdmin(adminEmail)) {
+    if (!isAdmin(adminEmail, pin)) {
       throw new Error("Unauthorized access. Admin privileges required.");
     }
     if (!performerData || !performerData.email) {
@@ -488,7 +500,7 @@ function addPerformer(adminEmail, performerData) {
       if (roleCol !== -1 && cleanRole) profilesSheet.getRange(existingRow, roleCol + 1).setValue(cleanRole);
       if (statusCol !== -1) profilesSheet.getRange(existingRow, statusCol + 1).setValue("Active");
       
-      excludePerformer(adminEmail, cleanEmail, false);
+      excludePerformer(adminEmail, cleanEmail, false, pin);
 
       return {
         success: true,
@@ -541,9 +553,9 @@ function addPerformer(adminEmail, performerData) {
 /**
  * Excludes or re-includes a performer from active duty, switcher, and assignment selectors.
  */
-function excludePerformer(adminEmail, targetEmail, isExcluded) {
+function excludePerformer(adminEmail, targetEmail, isExcluded, pin) {
   try {
-    if (!isAdmin(adminEmail)) {
+    if (!isAdmin(adminEmail, pin)) {
       throw new Error("Unauthorized access. Admin privileges required.");
     }
     if (!targetEmail) {
@@ -1859,7 +1871,7 @@ function validateCredentials(email, pin) {
   // Find column indexes strictly by dynamic header strings (column position agnostic)
   const headers = values[0].map(h => h.toString().toLowerCase().trim());
   const emailCol = headers.findIndex(h => h.includes("email") || h.includes("correo"));
-  const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\\u00f3digo"));
+  const pinCol = headers.findIndex(h => h.includes("pin") || h.includes("code") || h.includes("c\u00f3digo"));
   
   // Specific header exclusions to avoid collisions
   const nameCol = headers.findIndex(h => (h.includes("name") || h.includes("nombre") || h.includes("fullname") || h.includes("full name")) && 
@@ -1899,8 +1911,8 @@ function validateCredentials(email, pin) {
   const performerId = idCol !== -1 ? userRow[idCol] : "TD-UNKNOWN";
   
   // Find gender and title columns dynamically
-  const genderCol = headers.findIndex(h => h.includes("gender") || h.includes("g\\u00e9nero") || h.includes("sexo"));
-  const titleCol = headers.findIndex(h => h.includes("title") || h.includes("t\\u00edtulo") || h.includes("role") || h.includes("puesto") || /\brol\b/.test(h));
+  const genderCol = headers.findIndex(h => h.includes("gender") || h.includes("g\u00e9nero") || h.includes("sexo"));
+  const titleCol = headers.findIndex(h => h.includes("title") || h.includes("t\u00edtulo") || h.includes("role") || h.includes("puesto") || /\brol\b/.test(h));
   
   const gender = genderCol !== -1 ? userRow[genderCol].toString().trim() : "";
   const title = titleCol !== -1 ? userRow[titleCol].toString().trim() : "";
@@ -1943,7 +1955,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
     
     // Formatting the name from email
     const performerName = formatEmailToName(recipientEmail);
-    const subject = `Tradici\\u00f3n Inventory Checklist \\u2014 ${performerName}`;
+    const subject = `Tradici\u00f3n Inventory Checklist \u2014 ${performerName}`;
     
     let tableRowsHtml = "";
     items.forEach(item => {
@@ -1973,7 +1985,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
     const body = `
       <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 650px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #ffffff;">
         <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 20px; margin-bottom: 25px;">
-          <h2 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Tradici\\u00f3n Costume & Prop Checklist</h2>
+          <h2 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Tradici\u00f3n Costume & Prop Checklist</h2>
           <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Authoritative Performer Ledger</p>
         </div>
         
@@ -2002,7 +2014,7 @@ function emailFilteredInventoryList(userEmail, recipientEmail, items, filterType
         
         <div style="margin-top: 35px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px;">
           <p style="font-size: 12px; color: #94a3b8; margin: 0;">Salsa Guy Richmond, LLC / Tradici&oacute;n Dance Company</p>
-          <p style="font-size: 12px; color: #ef4444; font-weight: bold; margin-top: 5px;">Smile, Jesus loves you \\ud83d\\ude42</p>
+          <p style="font-size: 12px; color: #ef4444; font-weight: bold; margin-top: 5px;">Smile, Jesus loves you \ud83d\ude42</p>
         </div>
       </div>
     `;
@@ -2318,7 +2330,7 @@ function recreateValidations() {
         uniqueTypes.push("General");
       }
       uniqueTypes.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-      uniqueTypes.unshift("\\u2014 (Unassigned)");
+      uniqueTypes.unshift("\u2014 (Unassigned)");
       
       const typeRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(uniqueTypes, true)
@@ -2332,7 +2344,7 @@ function recreateValidations() {
     // 2. Recreate Location Validation
     if (locationCol !== -1) {
       const locations = [
-        "\\u2014 (Unassigned)",
+        "\u2014 (Unassigned)",
         "Office",
         "Plastic Shed Backyard",
         "Shed Left Wall",
@@ -2385,11 +2397,11 @@ function recreateValidations() {
       // Sort emails alphabetically
       performerEmails.sort();
       
-      // Add standard options like "AVAILABLE" and "\\u2014 (Unassigned)"
+      // Add standard options like "AVAILABLE" and "\u2014 (Unassigned)"
       if (performerEmails.indexOf("AVAILABLE") === -1) {
         performerEmails.unshift("AVAILABLE");
       }
-      performerEmails.unshift("\\u2014 (Unassigned)");
+      performerEmails.unshift("\u2014 (Unassigned)");
       
       const assignedRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(performerEmails, true)
@@ -2403,7 +2415,7 @@ function recreateValidations() {
     // 4. Recreate Sex Validation
     if (sexCol !== -1) {
       const sexOptions = [
-        "\\u2014 (Not Set)",
+        "\u2014 (Not Set)",
         "All",
         "Boy",
         "Girl",

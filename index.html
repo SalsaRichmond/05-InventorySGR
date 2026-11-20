@@ -3383,21 +3383,25 @@
           .then(successCallback)
           .catch(failureCallback);
       } else {
-        // POST actions (updateStatus, sendEmails)
+        // POST actions (login, updateStatus, assignItems, uploadInventory, addPerformer, excludePerformer, etc.)
+        const postBody = {
+          action: action,
+          ...payload
+        };
+        if (typeof state !== 'undefined' && state.pin && !postBody.pin) {
+          postBody.pin = state.pin;
+        }
         fetch(API_URL, {
           method: 'POST',
           mode: 'cors',
           headers: {
             'Content-Type': 'text/plain'
           },
-          body: JSON.stringify({
-            action: action,
-            ...payload
-          })
+          body: JSON.stringify(postBody)
         })
         .then(res => res.json())
         .then(res => {
-          if (res.success === false) {
+          if (res.success === false && action !== 'login' && action !== 'requestAccessLink') {
             failureCallback(res.error || "API returned error status");
           } else {
             successCallback(res);
@@ -6991,6 +6995,7 @@
 
       callAPI('addPerformer', {
         adminEmail: state.email,
+        pin: state.pin,
         performer: {
           name: name,
           email: email,
@@ -7046,6 +7051,7 @@
 
       callAPI('excludePerformer', {
         adminEmail: state.email,
+        pin: state.pin,
         performerEmail: cleanEmail,
         excluded: targetState
       }, onDone, onError);
