@@ -70,9 +70,9 @@
       --bg-card: #ffffff;
       --bg-input: #f1f5f9;
       --text-main: #0f172a;
-      --text-muted: #64748b;
+      --text-muted: #475569;
       --border-color: #cbd5e1;
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
     }
 
     * {
@@ -1958,6 +1958,116 @@
     .btn-toggle-exclude.action-include:hover {
       background: rgba(245, 197, 66, 0.15);
     }
+
+    /* Light Mode High-Contrast Enhancements for Modals, Roster, Pills & Labels */
+    [data-theme="light"] .performer-modal-header {
+      background: #f1f5f9;
+      border-bottom: 1px solid #cbd5e1;
+    }
+    [data-theme="light"] .performer-form-box {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    [data-theme="light"] .performer-form-box .form-input,
+    [data-theme="light"] .performer-form-box .view-select,
+    [data-theme="light"] #rosterSearchInput {
+      background-color: #ffffff;
+      border-color: #94a3b8;
+      color: #0f172a;
+    }
+    [data-theme="light"] .roster-stat-pill {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #334155;
+    }
+    [data-theme="light"] .roster-stat-pill.active,
+    [data-theme="light"] .roster-status-badge.active {
+      background: rgba(4, 120, 87, 0.12);
+      border-color: rgba(4, 120, 87, 0.35);
+      color: #047857;
+    }
+    [data-theme="light"] .roster-stat-pill.excluded,
+    [data-theme="light"] .roster-status-badge.excluded {
+      background: rgba(180, 83, 9, 0.12);
+      border-color: rgba(180, 83, 9, 0.38);
+      color: #b45309;
+    }
+    [data-theme="light"] .roster-role-tag {
+      background: rgba(67, 56, 202, 0.1);
+      color: #4338ca;
+      border-color: rgba(67, 56, 202, 0.3);
+    }
+    [data-theme="light"] .roster-avatar {
+      background: rgba(180, 83, 9, 0.15);
+      color: #92400e;
+    }
+    [data-theme="light"] .roster-avatar.excluded {
+      background: #e2e8f0;
+      color: #475569;
+    }
+    [data-theme="light"] .roster-row:hover {
+      background: rgba(15, 23, 42, 0.035);
+    }
+    [data-theme="light"] .roster-row.is-excluded {
+      opacity: 0.95;
+      background: rgba(245, 158, 11, 0.06);
+    }
+    [data-theme="light"] .btn-toggle-exclude.action-include {
+      background: rgba(180, 83, 9, 0.1);
+      border: 1.5px solid #b45309;
+      color: #92400e;
+      font-weight: 700;
+    }
+    [data-theme="light"] .btn-toggle-exclude.action-include:hover {
+      background: #b45309;
+      color: #ffffff;
+    }
+    [data-theme="light"] .btn-toggle-exclude.action-exclude {
+      background: rgba(220, 38, 38, 0.08);
+      border: 1.5px solid #dc2626;
+      color: #b91c1c;
+      font-weight: 700;
+    }
+    [data-theme="light"] .btn-toggle-exclude.action-exclude:hover {
+      background: #dc2626;
+      color: #ffffff;
+    }
+    [data-theme="light"] .assigned-inline-row .status-label {
+      color: #b45309 !important;
+    }
+    [data-theme="light"] .batch-count-badge {
+      background: rgba(180, 83, 9, 0.12);
+      color: #92400e;
+      border-color: rgba(180, 83, 9, 0.4);
+    }
+    [data-theme="light"] .pill-cost {
+      background-color: rgba(180, 83, 9, 0.12);
+      border-color: rgba(180, 83, 9, 0.35);
+      color: #92400e;
+    }
+    [data-theme="light"] .pill-id {
+      background-color: #e2e8f0;
+      border-color: #cbd5e1;
+      color: #334155;
+    }
+    [data-theme="light"] .pill-type {
+      background-color: rgba(67, 56, 202, 0.1);
+      border-color: rgba(67, 56, 202, 0.3);
+      color: #4338ca;
+    }
+    [data-theme="light"] .pill-assigned {
+      background-color: rgba(2, 132, 199, 0.1);
+      border-color: rgba(2, 132, 199, 0.3);
+      color: #0369a1;
+    }
+    [data-theme="light"] .pill-location {
+      background-color: rgba(4, 120, 87, 0.1);
+      border-color: rgba(4, 120, 87, 0.3);
+      color: #047857;
+    }
+    [data-theme="light"] .sync-status.saving {
+      color: #b45309;
+    }
   </style>
 </head>
 <body>
@@ -2619,6 +2729,8 @@
         filterAll: "All",
         filterActive: "Active",
         filterExcluded: "Excluded",
+        statusActive: "Active",
+        statusExcluded: "Excluded",
         btnExclude: "Exclude",
         btnInclude: "Re-include",
         assignedItemsSuffix: "items assigned",
@@ -2751,6 +2863,8 @@
         filterAll: "Todos",
         filterActive: "Activos",
         filterExcluded: "Excluidos",
+        statusActive: "Activo",
+        statusExcluded: "Excluido",
         btnExclude: "Excluir",
         btnInclude: "Reactivar",
         assignedItemsSuffix: "artículos asignados",
@@ -6773,7 +6887,7 @@
         const count = assignedCounts[cleanEmail] || 0;
         const itemsLabel = `${count} ${dict.assignedItemsSuffix || 'items assigned'}`;
         const statusBadgeClass = isExcluded ? 'excluded' : 'active';
-        const statusText = isExcluded ? dict.statusExcluded : dict.statusActive;
+        const statusText = isExcluded ? (dict.statusExcluded || 'Excluded') : (dict.statusActive || 'Active');
         const actionBtnClass = isExcluded ? 'action-include' : 'action-exclude';
         const actionBtnText = isExcluded ? dict.btnInclude : dict.btnExclude;
 
@@ -7217,7 +7331,9 @@
           rowIndex: rowIndex,
           expectedId: itemId,
           newStatus: newStatus,
-          performerNotes: notesText
+          performerNotes: notesText,
+          actorEmail: state.email,
+          actorName: state.name
         },
         (response) => {
           if (response.success) {

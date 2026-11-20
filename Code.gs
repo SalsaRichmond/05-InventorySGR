@@ -166,9 +166,16 @@ function doPost(e) {
         postData.rowIndex,
         postData.expectedId,
         postData.newStatus,
-        postData.performerNotes
+        postData.performerNotes,
+        postData.actorEmail,
+        postData.actorName
       );
       return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    if (postData.action === "sendDailyDigest") {
+      const digestResult = sendDailyInventoryChangesDigest();
+      return ContentService.createTextOutput(JSON.stringify({ success: true, result: digestResult }))
         .setMimeType(ContentService.MimeType.JSON);
     }
     if (postData.action === "sendEmails") {
@@ -872,7 +879,7 @@ function getOrCreateStatusColumn(sheet, lowerHeaders) {
  * Server-side endpoint to save updates. Called via google.script.run from client JS.
  * Employs row validation check to prevent collision in case of concurrent edits.
  */
-function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNotes) {
+function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNotes, actorEmail, actorName) {
   try {
     const ss = getInventorySpreadsheet();
     const sheet = ss.getSheetByName("Inventory") || ss.getSheets()[0];
@@ -884,6 +891,8 @@ function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNote
     const lowerHeaders = headers.map(h => h.toString().toLowerCase().trim());
     
     const idCol = lowerHeaders.indexOf("id");
+    const descCol = lowerHeaders.indexOf("item description");
+    const assignedCol = lowerHeaders.indexOf("assigned");
     const statusCol = getOrCreateStatusColumn(sheet, lowerHeaders);
     const performerNotesCol = getOrCreatePerformerNotesColumn(sheet, lowerHeaders);
     
@@ -918,10 +927,48 @@ function updateItemStatusAndNotes(rowIndex, expectedId, newStatus, performerNote
       targetRow = foundRow;
       Logger.log(`Collision Guard: Correct row resolved at index ${targetRow}.`);
     }
+
+    // Capture previous values before updating for daily change tracking
+    const rowValues = sheet.getRange(targetRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const oldStatus = (statusCol !== -1 && rowValues[statusCol] !== undefined ? rowValues[statusCol].toString().trim() : "") || "-";
+    const oldNotes = performerNotesCol !== -1 && rowValues[performerNotesCol] !== undefined ? rowValues[performerNotesCol].toString().trim() : "";
+    const itemDesc = descCol !== -1 && rowValues[descCol] ? rowValues[descCol].toString().trim() : "Unlabeled Costume/Prop";
+    const assignedEmail = assignedCol !== -1 && rowValues[assignedCol] ? rowValues[assignedCol].toString().trim().toLowerCase() : "";
+    const resolvedItemId = (idCol !== -1 && rowValues[idCol] ? rowValues[idCol].toString().trim() : "") || expectedId || "N/A";
+
+    const cleanNewStatus = (newStatus !== undefined && newStatus !== null ? newStatus.toString().trim() : "") || "-";
+    const cleanNewNotes = performerNotes !== undefined && performerNotes !== null ? performerNotes.toString().trim() : "";
     
     // Write values to target row
     sheet.getRange(targetRow, statusCol + 1).setValue(newStatus);
     sheet.getRange(targetRow, performerNotesCol + 1).setValue(performerNotes);
+
+    // Determine who made the change and log if Item Status or Performer Notes changed
+    const whoEmail = (actorEmail ? actorEmail.toString().trim().toLowerCase() : "") || assignedEmail || "unknown";
+    const whoName = (actorName ? actorName.toString().trim() : "") || getPerformerNameFromProfile(whoEmail) || (whoEmail !== "unknown" ? formatEmailToName(whoEmail) : "Performer");
+
+    if (oldStatus !== cleanNewStatus) {
+      logInventoryFieldChange({
+        itemId: resolvedItemId,
+        description: itemDesc,
+        field: "Item Status",
+        oldValue: oldStatus,
+        newValue: cleanNewStatus,
+        actorEmail: whoEmail,
+        actorName: whoName
+      });
+    }
+    if (oldNotes !== cleanNewNotes) {
+      logInventoryFieldChange({
+        itemId: resolvedItemId,
+        description: itemDesc,
+        field: "Performer Notes",
+        oldValue: oldNotes || "(empty)",
+        newValue: cleanNewNotes || "(empty)",
+        actorEmail: whoEmail,
+        actorName: whoName
+      });
+    }
     
     return {
       success: true,
@@ -959,6 +1006,7 @@ function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail, pin) {
     const lowerHeaders = headers.map(h => h.toString().toLowerCase().trim());
     
     const idCol = lowerHeaders.indexOf("id");
+    const descCol = lowerHeaders.indexOf("item description");
     const assignedCol = lowerHeaders.indexOf("assigned");
     if (assignedCol === -1) {
       throw new Error("System Error: 'Assigned' column was not found in the spreadsheet headers.");
@@ -974,6 +1022,9 @@ function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail, pin) {
         }
       }
     }
+
+    const actorEmailClean = (adminEmail || "").toString().trim().toLowerCase();
+    const actorNameClean = getPerformerNameFromProfile(actorEmailClean) || (actorEmailClean ? formatEmailToName(actorEmailClean) : "Administrator");
     
     let updatedCount = 0;
     for (let j = 0; j < items.length; j++) {
@@ -1000,8 +1051,25 @@ function assignItemsToPerformer(adminEmail, items, defaultPerformerEmail, pin) {
       }
       
       if (targetRow !== -1) {
+        const targetRowArr = values[targetRow - 1] || [];
+        const oldAssigned = (targetRowArr[assignedCol] !== undefined ? targetRowArr[assignedCol].toString().trim().toLowerCase() : "");
+        const resolvedId = (idCol !== -1 && targetRowArr[idCol] ? targetRowArr[idCol].toString().trim() : "") || expectedId || "N/A";
+        const itemDesc = (descCol !== -1 && targetRowArr[descCol] ? targetRowArr[descCol].toString().trim() : "") || "Unlabeled Costume/Prop";
+
         sheet.getRange(targetRow, assignedCol + 1).setValue(targetPerformer);
         updatedCount++;
+
+        if (oldAssigned !== targetPerformer) {
+          logInventoryFieldChange({
+            itemId: resolvedId,
+            description: itemDesc,
+            field: "ASSIGN TO",
+            oldValue: formatAssigneeForDigest(oldAssigned),
+            newValue: formatAssigneeForDigest(targetPerformer),
+            actorEmail: actorEmailClean,
+            actorName: actorNameClean
+          });
+        }
       }
     }
     
@@ -1149,8 +1217,28 @@ function uploadInventory(adminEmail, items, pin) {
           sheet.getRange(targetRow, descCol + 1).setValue(finalDesc);
         }
       }
+      const existingRowArr = (targetRow <= values.length && values[targetRow - 1]) ? values[targetRow - 1] : [];
+      const prevAssigned = (assignedCol !== -1 && existingRowArr[assignedCol] !== undefined) ? existingRowArr[assignedCol].toString().trim().toLowerCase() : "";
+      const prevStatus = ((statusCol !== -1 && existingRowArr[statusCol] !== undefined) ? existingRowArr[statusCol].toString().trim() : "") || "-";
+      const prevNotes = (performerNotesCol !== -1 && existingRowArr[performerNotesCol] !== undefined) ? existingRowArr[performerNotesCol].toString().trim() : "";
+      const actorEmailClean = (adminEmail || "").toString().trim().toLowerCase();
+      const actorNameClean = getPerformerNameFromProfile(actorEmailClean) || (actorEmailClean ? formatEmailToName(actorEmailClean) : "Administrator");
+      const resolvedDescForLog = finalDesc || (descCol !== -1 && existingRowArr[descCol] ? existingRowArr[descCol].toString().trim() : "Unlabeled Costume/Prop");
+
       if (item.assigned !== undefined && assignedCol !== -1) {
+        const newAssignedClean = item.assigned.toString().trim().toLowerCase();
         sheet.getRange(targetRow, assignedCol + 1).setValue(item.assigned);
+        if (prevAssigned !== newAssignedClean) {
+          logInventoryFieldChange({
+            itemId: itemId || "N/A",
+            description: resolvedDescForLog,
+            field: "ASSIGN TO",
+            oldValue: formatAssigneeForDigest(prevAssigned),
+            newValue: formatAssigneeForDigest(newAssignedClean),
+            actorEmail: actorEmailClean,
+            actorName: actorNameClean
+          });
+        }
       }
       if (item.picUrl !== undefined && picsCol !== -1) {
         const urlRange = sheet.getRange(targetRow, picsCol + 1);
@@ -1165,7 +1253,19 @@ function uploadInventory(adminEmail, items, pin) {
         sheet.getRange(targetRow, costCol + 1).setValue(item.cost);
       }
       if (item.status !== undefined && statusCol !== -1) {
+        const newStatusClean = (item.status.toString().trim()) || "-";
         sheet.getRange(targetRow, statusCol + 1).setValue(item.status);
+        if (prevStatus !== newStatusClean) {
+          logInventoryFieldChange({
+            itemId: itemId || "N/A",
+            description: resolvedDescForLog,
+            field: "Item Status",
+            oldValue: prevStatus,
+            newValue: newStatusClean,
+            actorEmail: actorEmailClean,
+            actorName: actorNameClean
+          });
+        }
       }
       if (item.type !== undefined && typeCol !== -1) {
         sheet.getRange(targetRow, typeCol + 1).setValue(item.type);
@@ -1177,7 +1277,19 @@ function uploadInventory(adminEmail, items, pin) {
         sheet.getRange(targetRow, sexCol + 1).setValue(item.sex);
       }
       if (item.notes !== undefined && performerNotesCol !== -1) {
+        const newNotesClean = item.notes.toString().trim();
         sheet.getRange(targetRow, performerNotesCol + 1).setValue(item.notes);
+        if (prevNotes !== newNotesClean) {
+          logInventoryFieldChange({
+            itemId: itemId || "N/A",
+            description: resolvedDescForLog,
+            field: "Performer Notes",
+            oldValue: prevNotes || "(empty)",
+            newValue: newNotesClean || "(empty)",
+            actorEmail: actorEmailClean,
+            actorName: actorNameClean
+          });
+        }
       }
     }
     
@@ -1400,7 +1512,278 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Tradici\u00f3n Inventory')
     .addItem('Send Inventory Links to Performers', 'sendPerformerInventoryEmails')
+    .addSeparator()
+    .addItem('Send Daily Changes Digest Now', 'sendDailyInventoryChangesDigest')
+    .addItem('Enable Daily Changes Email Trigger', 'ensureDailyDigestTrigger')
     .addToUi();
+}
+
+const DAILY_DIGEST_RECIPIENTS = "rodriguez2113@gmail.com,darienl140@gmail.com";
+
+/**
+ * Formats an assignee email with their profile name for readability in the daily digest.
+ */
+function formatAssigneeForDigest(email) {
+  if (!email) return "Unassigned";
+  const clean = email.toString().trim().toLowerCase();
+  if (!clean || clean === "-" || clean === "unassigned" || clean === "available") {
+    return "Unassigned";
+  }
+  const profileName = getPerformerNameFromProfile(clean);
+  if (profileName) {
+    return `${profileName} (${clean})`;
+  }
+  return clean;
+}
+
+/**
+ * Records a change made to ASSIGN TO, Item Status, or Performer Notes for the daily email digest.
+ */
+function logInventoryFieldChange(changeObj) {
+  try {
+    const now = new Date();
+    const timestamp = Utilities.formatDate(now, Session.getScriptTimeZone() || "America/New_York", "yyyy-MM-dd hh:mm:ss a");
+    const record = {
+      timestamp: timestamp,
+      itemId: (changeObj.itemId || "N/A").toString(),
+      description: (changeObj.description || "Unlabeled Costume/Prop").toString(),
+      field: (changeObj.field || "Field").toString(),
+      oldValue: (changeObj.oldValue !== undefined && changeObj.oldValue !== null ? changeObj.oldValue : "-").toString(),
+      newValue: (changeObj.newValue !== undefined && changeObj.newValue !== null ? changeObj.newValue : "-").toString(),
+      actorEmail: (changeObj.actorEmail || "unknown").toString(),
+      actorName: (changeObj.actorName || "Performer").toString()
+    };
+
+    // 1. Append to ScriptProperties queue
+    try {
+      const props = PropertiesService.getScriptProperties();
+      const raw = props.getProperty("DAILY_INVENTORY_CHANGES");
+      let list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) list = [];
+      list.push(record);
+      // Keep within ScriptProperties size limit
+      if (list.length > 250) {
+        list = list.slice(list.length - 250);
+      }
+      props.setProperty("DAILY_INVENTORY_CHANGES", JSON.stringify(list));
+    } catch (propErr) {
+      Logger.log("Failed writing DAILY_INVENTORY_CHANGES to ScriptProperties: " + propErr.toString());
+    }
+
+    // 2. Also append to DailyChangeLog sheet for persistent audit trail
+    try {
+      const ss = getInventorySpreadsheet();
+      let logSheet = ss.getSheetByName("DailyChangeLog");
+      if (!logSheet) {
+        logSheet = ss.insertSheet("DailyChangeLog");
+        logSheet.appendRow(["Timestamp", "Item ID", "Item Description", "Field Changed", "Previous Value", "New Value", "Changed By Name", "Changed By Email", "Digest Status"]);
+        logSheet.hideSheet();
+      }
+      logSheet.appendRow([
+        record.timestamp,
+        record.itemId,
+        record.description,
+        record.field,
+        record.oldValue,
+        record.newValue,
+        record.actorName,
+        record.actorEmail,
+        "PENDING"
+      ]);
+    } catch (sheetErr) {
+      Logger.log("Failed appending to DailyChangeLog sheet: " + sheetErr.toString());
+    }
+
+    // 3. Ensure daily trigger is active
+    ensureDailyDigestTrigger();
+  } catch (err) {
+    Logger.log("Error in logInventoryFieldChange: " + err.toString());
+  }
+}
+
+/**
+ * Ensures a once-a-day time-driven trigger exists for sendDailyInventoryChangesDigest.
+ */
+function ensureDailyDigestTrigger() {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const exists = triggers.some(t => t.getHandlerFunction() === "sendDailyInventoryChangesDigest");
+    if (!exists) {
+      ScriptApp.newTrigger("sendDailyInventoryChangesDigest")
+        .timeBased()
+        .everyDays(1)
+        .atHour(20)
+        .create();
+      Logger.log("Created daily time-driven trigger for sendDailyInventoryChangesDigest.");
+    }
+  } catch (err) {
+    Logger.log("Could not auto-verify/create daily digest trigger: " + err.toString());
+  }
+}
+
+/**
+ * Sends a daily summary email to rodriguez2113@gmail.com and darienl140@gmail.com
+ * listing all changes made that day to ASSIGN TO, Item Status, and Performer Notes,
+ * grouped by item and showing who made each change.
+ * If no changes were made, no email is sent.
+ */
+function sendDailyInventoryChangesDigest() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    let changes = [];
+
+    // 1. Read from ScriptProperties
+    try {
+      const raw = props.getProperty("DAILY_INVENTORY_CHANGES");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          changes = parsed;
+        }
+      }
+    } catch (e) {
+      Logger.log("Failed parsing DAILY_INVENTORY_CHANGES property: " + e.toString());
+    }
+
+    // 2. Fallback/sync with DailyChangeLog sheet if ScriptProperties was empty
+    let logSheet = null;
+    let pendingSheetRows = [];
+    try {
+      const ss = getInventorySpreadsheet();
+      logSheet = ss.getSheetByName("DailyChangeLog");
+      if (logSheet && logSheet.getLastRow() > 1) {
+        const values = logSheet.getDataRange().getValues();
+        for (let i = 1; i < values.length; i++) {
+          if (values[i][8] === "PENDING") {
+            pendingSheetRows.push(i + 1);
+            if (changes.length === 0) {
+              changes.push({
+                timestamp: values[i][0].toString(),
+                itemId: values[i][1].toString(),
+                description: values[i][2].toString(),
+                field: values[i][3].toString(),
+                oldValue: values[i][4].toString(),
+                newValue: values[i][5].toString(),
+                actorName: values[i][6].toString(),
+                actorEmail: values[i][7].toString()
+              });
+            }
+          }
+        }
+      }
+    } catch (sheetErr) {
+      Logger.log("Failed reading DailyChangeLog sheet: " + sheetErr.toString());
+    }
+
+    // If no changes were made today, do not send any email
+    if (!changes || changes.length === 0) {
+      Logger.log("No inventory changes recorded for today. No daily digest email needed.");
+      return { sent: false, reason: "No changes recorded today." };
+    }
+
+    // Group changes by Item (itemId + description)
+    const itemsMap = {};
+    const itemKeysOrder = [];
+    changes.forEach(ch => {
+      const key = `${ch.itemId || 'N/A'}||${ch.description || 'Item'}`;
+      if (!itemsMap[key]) {
+        itemsMap[key] = {
+          itemId: ch.itemId || "N/A",
+          description: ch.description || "Unlabeled Costume/Prop",
+          events: []
+        };
+        itemKeysOrder.push(key);
+      }
+      itemsMap[key].events.push(ch);
+    });
+
+    const dateLabel = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "America/New_York", "MMMM d, yyyy");
+    const subject = `\ud83d\udccb Tradici\u00f3n Inventory Daily Changes Report \u2014 ${dateLabel} (${changes.length} update${changes.length === 1 ? '' : 's'})`;
+
+    let itemsHtml = "";
+    itemKeysOrder.forEach(key => {
+      const group = itemsMap[key];
+      let rowsHtml = "";
+      group.events.forEach(ev => {
+        let badgeColor = "#3b82f6";
+        if (ev.field === "ASSIGN TO") badgeColor = "#d97706";
+        else if (ev.field === "Item Status") badgeColor = "#16a34a";
+        else if (ev.field === "Performer Notes") badgeColor = "#7c3aed";
+
+        const actorDisplay = ev.actorEmail && ev.actorEmail !== "unknown"
+          ? `<strong>${ev.actorName}</strong> <span style="color:#64748b;">(${ev.actorEmail})</span>`
+          : `<strong>${ev.actorName}</strong>`;
+
+        rowsHtml += `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 10px; font-size: 13px; white-space: nowrap;">
+              <span style="background-color: ${badgeColor}; color: #ffffff; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; text-transform: uppercase;">${ev.field}</span>
+            </td>
+            <td style="padding: 10px; font-size: 13px; color: #64748b;">${ev.oldValue}</td>
+            <td style="padding: 10px; font-size: 13px; font-weight: 700; color: #0f172a;">&rarr; ${ev.newValue}</td>
+            <td style="padding: 10px; font-size: 13px; color: #334155;">${actorDisplay}</td>
+            <td style="padding: 10px; font-size: 12px; color: #64748b; white-space: nowrap;">${ev.timestamp}</td>
+          </tr>
+        `;
+      });
+
+      itemsHtml += `
+        <div style="margin-bottom: 22px; border: 1px solid #cbd5e1; border-radius: 10px; overflow: hidden; background-color: #ffffff;">
+          <div style="background-color: #0f172a; color: #ffffff; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 700; font-size: 15px;"><span style="color: #f5c542;">ID #${group.itemId}</span> &mdash; ${group.description}</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+              <tr style="background-color: #f8fafc; border-bottom: 1px solid #cbd5e1; font-size: 11px; color: #475569; text-transform: uppercase;">
+                <th style="padding: 8px 10px;">Field</th>
+                <th style="padding: 8px 10px;">Previous</th>
+                <th style="padding: 8px 10px;">New Value</th>
+                <th style="padding: 8px 10px;">Changed By</th>
+                <th style="padding: 8px 10px;">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    });
+
+    const htmlBody = `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+        <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 15px; margin-bottom: 20px;">
+          <h2 style="color: #0f172a; margin: 0; font-size: 22px; font-weight: 800;">Tradici\u00f3n Inventory &mdash; Daily Changes Digest</h2>
+          <p style="color: #475569; margin: 5px 0 0 0; font-size: 14px;">Summary of updates to <strong>ASSIGN TO</strong>, <strong>Item Status</strong>, and <strong>Performer Notes</strong> for ${dateLabel}</p>
+        </div>
+        ${itemsHtml}
+        <div style="margin-top: 25px; text-align: center; border-top: 1px solid #cbd5e1; padding-top: 15px; font-size: 12px; color: #64748b;">
+          <p style="margin: 0;">Salsa Guy Richmond, LLC / Tradici\u00f3n Dance Company</p>
+          <p style="color: #ef4444; font-weight: bold; margin: 4px 0 0 0;">Smile, Jesus loves you \ud83d\ude42</p>
+        </div>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: DAILY_DIGEST_RECIPIENTS,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+
+    // Clear pending queue after successful email dispatch
+    props.deleteProperty("DAILY_INVENTORY_CHANGES");
+    if (logSheet && pendingSheetRows.length > 0) {
+      pendingSheetRows.forEach(r => {
+        logSheet.getRange(r, 9).setValue("SENT");
+      });
+    }
+
+    Logger.log(`Daily inventory changes digest sent to ${DAILY_DIGEST_RECIPIENTS} with ${changes.length} changes.`);
+    return { sent: true, count: changes.length, recipients: DAILY_DIGEST_RECIPIENTS };
+  } catch (err) {
+    Logger.log("Error in sendDailyInventoryChangesDigest: " + err.toString());
+    return { sent: false, error: err.toString() };
+  }
 }
 
 /**
